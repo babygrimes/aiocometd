@@ -45,8 +45,7 @@ class Client:  # pylint: disable=too-many-instance-attributes
                  extensions: Optional[List[Extension]] = None,
                  auth: Optional[AuthExtension] = None,
                  json_dumps: JsonDumper = json.dumps,
-                 json_loads: JsonLoader = json.loads,
-                 loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+                 json_loads: JsonLoader = json.loads) -> None:
         """
         :param url: CometD service url
         :param connection_types: List of connection types in order of \
@@ -74,10 +73,6 @@ class Client:  # pylint: disable=too-many-instance-attributes
         :func:`json.dumps`
         :param json_loads: Function for JSON deserialization, the default is \
         :func:`json.loads`
-        :param loop: Event :obj:`loop <asyncio.BaseEventLoop>` used to
-                     schedule tasks. If *loop* is ``None`` then
-                     :func:`asyncio.get_event_loop` is used to get the default
-                     event loop.
         """
         #: CometD service url
         self.url = url
@@ -88,7 +83,6 @@ class Client:  # pylint: disable=too-many-instance-attributes
             self._connection_types = list(connection_types)
         else:
             self._connection_types = self._DEFAULT_CONNECTION_TYPES
-        self._loop = loop or asyncio.get_event_loop()
         #: queue for consuming incoming event messages
         self._incoming_queue: "Optional[asyncio.Queue[JsonObject]]" = None
         #: transport object
@@ -115,7 +109,7 @@ class Client:  # pylint: disable=too-many-instance-attributes
         """Formal string representation"""
         cls_name = type(self).__name__
         fmt_spec = "{}({}, {}, connection_timeout={}, ssl={}, " \
-                   "max_pending_count={}, extensions={}, auth={}, loop={})"
+                   "max_pending_count={}, extensions={}, auth={})"
         return fmt_spec.format(cls_name,
                                reprlib.repr(self.url),
                                reprlib.repr(self._connection_types),
@@ -123,8 +117,7 @@ class Client:  # pylint: disable=too-many-instance-attributes
                                reprlib.repr(self.ssl),
                                reprlib.repr(self._max_pending_count),
                                reprlib.repr(self.extensions),
-                               reprlib.repr(self.auth),
-                               reprlib.repr(self._loop))
+                               reprlib.repr(self.auth))
 
     @property
     def closed(self) -> bool:
@@ -202,8 +195,7 @@ class Client:  # pylint: disable=too-many-instance-attributes
                                      extensions=self.extensions,
                                      auth=self.auth,
                                      json_dumps=self._json_dumps,
-                                     json_loads=self._json_loads,
-                                     loop=self._loop)
+                                     json_loads=self._json_loads)
 
         try:
             response = await transport.handshake(self._connection_types)
@@ -244,8 +236,7 @@ class Client:  # pylint: disable=too-many-instance-attributes
                     json_dumps=self._json_dumps,
                     json_loads=self._json_loads,
                     reconnect_advice=advice,
-                    http_session=session,
-                    loop=self._loop)
+                    http_session=session)
             return transport
         except Exception:
             await transport.close()
@@ -458,14 +449,12 @@ class Client:  # pylint: disable=too-many-instance-attributes
         if connection_timeout:
             timeout_task = asyncio.ensure_future(
                 self._wait_connection_timeout(connection_timeout),
-                loop=self._loop
             )
             tasks.append(timeout_task)
 
         assert self._incoming_queue is not None
         # task waiting on incoming messages
-        get_task = asyncio.ensure_future(self._incoming_queue.get(),
-                                         loop=self._loop)
+        get_task = asyncio.ensure_future(self._incoming_queue.get())
         tasks.append(get_task)
 
         assert self._transport is not None
@@ -473,15 +462,13 @@ class Client:  # pylint: disable=too-many-instance-attributes
         server_disconnected_task = asyncio.ensure_future(
             self._transport.wait_for_state(
                 TransportState.SERVER_DISCONNECTED),
-            loop=self._loop
         )
         tasks.append(server_disconnected_task)
 
         try:
             done, pending = await asyncio.wait(
                 tasks,
-                return_when=asyncio.FIRST_COMPLETED,
-                loop=self._loop)
+                return_when=asyncio.FIRST_COMPLETED)
 
             # cancel all pending tasks
             for task in pending:
@@ -517,7 +504,6 @@ class Client:  # pylint: disable=too-many-instance-attributes
             try:
                 await asyncio.wait_for(
                     self._transport.wait_for_state(TransportState.CONNECTED),
-                    timeout, loop=self._loop
                 )
             except asyncio.TimeoutError:
                 break

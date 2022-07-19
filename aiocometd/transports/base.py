@@ -46,8 +46,7 @@ class TransportBase(Transport):  # pylint: disable=too-many-instance-attributes
                  json_dumps: JsonDumper = json.dumps,
                  json_loads: JsonLoader = json.loads,
                  reconnect_advice: Optional[JsonObject] = None,
-                 http_session: Optional[aiohttp.ClientSession] = None,
-                 loop: Optional[asyncio.AbstractEventLoop] = None) -> None:
+                 http_session: Optional[aiohttp.ClientSession] = None) -> None:
         """
         :param url: CometD service url
         :param incoming_queue: Queue for consuming incoming event
@@ -70,17 +69,11 @@ class TransportBase(Transport):  # pylint: disable=too-many-instance-attributes
         :func:`json.loads`
         :param reconnect_advice: Initial reconnect advice
         :param http_session: HTTP client session
-        :param loop: Event :obj:`loop <asyncio.BaseEventLoop>` used to
-                     schedule tasks. If *loop* is ``None`` then
-                     :func:`asyncio.get_event_loop` is used to get the default
-                     event loop.
         """
         #: queue for consuming incoming event messages
         self.incoming_queue = incoming_queue
         #: CometD service url
         self._url = url
-        #: event loop used to schedule tasks
-        self._loop = loop or asyncio.get_event_loop()
         #: clinet id value assigned by the server
         self._client_id = client_id
         #: message id which should be unique for every message during a client
@@ -470,7 +463,7 @@ class TransportBase(Transport):  # pylint: disable=too-many-instance-attributes
         :param coro: Coroutine
         :return: Future
         """
-        self._connect_task = asyncio.ensure_future(coro, loop=self._loop)
+        self._connect_task = asyncio.ensure_future(coro)
         self._connect_task.add_done_callback(self._connect_done)
         return self._connect_task
 
@@ -548,7 +541,7 @@ class TransportBase(Transport):  # pylint: disable=too-many-instance-attributes
                     "reconnect" in result["advice"]):
                 reconnect_advice = result["advice"]["reconnect"]
             self._state = TransportState.CONNECTED
-        except Exception as error:  # pylint: disable=broad-except
+        except (Exception, asyncio.CancelledError) as error:  # pylint: disable=broad-except
             result = error
             reconnect_timeout = self._reconnect_timeout
             if self.state != TransportState.DISCONNECTING:
@@ -575,15 +568,13 @@ class TransportBase(Transport):  # pylint: disable=too-many-instance-attributes
         # do a handshake operation if advised
         if reconnect_advice == "handshake":
             handshake_coro = defer(self.handshake,
-                                   delay=reconnect_timeout,
-                                   loop=self._loop)
+                                   delay=reconnect_timeout)
             self._start_connect_task(handshake_coro([self.connection_type]))
 
         # do a connect operation if advised
         elif reconnect_advice == "retry":
             connect_coro = defer(self._connect,
-                                 delay=reconnect_timeout,
-                                 loop=self._loop)
+                                 delay=reconnect_timeout)
             self._start_connect_task(connect_coro())
 
         # there is not reconnect advice from the server or its value
